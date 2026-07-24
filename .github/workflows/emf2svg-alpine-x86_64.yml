@@ -39,7 +39,7 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     container:
-      image: alpine:latest
+      image: alpine:3.21
     env:
       BUILD_TYPE: Release
       VCPKG_FORCE_SYSTEM_BINARIES: 1
