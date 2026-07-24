@@ -1,0 +1,85 @@
+# Copyright (c) 2021-2024 [Ribose Inc](https://www.ribose.com).
+# All rights reserved.
+# This file is a part of libemf2svg
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+# TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+# PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR CONTRIBUTORS
+# BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+# Builds a source-only libemf2svg.tar.gz (no vcpkg submodule contents,
+# no prebuilt binaries) and attaches it to the GitHub Release for the
+# pushed tag.
+#
+# Per-platform compilation happens in downstream consumers (e.g.
+# emf2svg-ruby), which bootstrap vcpkg themselves using the vcpkg.json
+# manifest shipped in this tarball.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - '*.*.*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag or ref to release'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref || github.ref }}
+        fetch-depth: 0
+        # No submodules: we ship source only. vcpkg is bootstrapped by
+        # the consumer, not bundled here.
+
+    - name: Build source tarball
+      run: ./scripts/build-release-tarball.sh "$RUNNER_TEMP"
+
+    - name: Resolve tag name
+      id: tag
+      run: |
+        if [ -n "${{ inputs.ref }}" ]; then
+          ref="${{ inputs.ref }}"
+        else
+          ref="${GITHUB_REF#refs/tags/}"
+        fi
+        ref="${ref#refs/tags/}"
+        echo "tag=$ref" >> "$GITHUB_OUTPUT"
+
+    - name: Upload to GitHub Releases
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.tag.outputs.tag }}
+        name: ${{ steps.tag.outputs.tag }}
+        generate_release_notes: true
+        files: |
+          ${{ runner.temp }}/libemf2svg.tar.gz
+          ${{ runner.temp }}/libemf2svg.tar.gz.sha256
