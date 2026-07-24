@@ -52,15 +52,29 @@ jobs:
             experimental: true
     runs-on: ${{ matrix.runner }}
     continue-on-error: ${{ matrix.experimental || false }}
+    env:
+      VCPKG_REF: 4f95fba7a7d1101bb8acdeb51e4609686449701e
     steps:
     - uses: actions/checkout@v4
-      with:
-        submodules: recursive
     - run: mkdir cache
     - uses: actions/cache@v4
       with:
-        path: cache
-        key: ${{ github.workflow }}-${{ matrix.runner }}-vcpkg-${{ hashFiles('.git/modules/*/HEAD') }}
+        path: |
+          cache
+          vcpkg\.git
+          vcpkg\buildtrees
+          vcpkg\downloads
+          vcpkg\packages
+        key: ${{ github.workflow }}-${{ matrix.runner }}-vcpkg-${{ env.VCPKG_REF }}
+    - name: Bootstrap vcpkg
+      shell: pwsh
+      run: |
+        if (-not (Test-Path vcpkg/vcpkg.exe)) {
+          git clone https://github.com/microsoft/vcpkg.git vcpkg
+          cd vcpkg
+          git checkout $env:VCPKG_REF
+          .\bootstrap-vcpkg.bat -disableMetrics
+        }
     - run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DVCPKG_TARGET_TRIPLET=arm64-windows -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake
     - run: cmake --build build --config ${{ env.BUILD_TYPE }}
     - run: |

@@ -43,17 +43,29 @@ jobs:
     env:
       BUILD_TYPE: Release
       VCPKG_FORCE_SYSTEM_BINARIES: 1
+      VCPKG_REF: 4f95fba7a7d1101bb8acdeb51e4609686449701e
     steps:
     - run: apk --no-cache add build-base cmake git valgrind argp-standalone gcompat clang gperf flex bison gettext-dev python3 ninja zip unzip curl pkgconfig libxml2-utils font-noto-hebrew font-noto-arabic libpng freetype fontconfig libuuid autoconf autoconf-archive automake libtool
     - uses: actions/checkout@v4
-      with:
-        submodules: recursive
     - run: git config --global --add safe.directory $(pwd)
     - run: mkdir -p cache && echo "VCPKG_DEFAULT_BINARY_CACHE=$(pwd)/cache" >> $GITHUB_ENV
     - uses: actions/cache@v4
       with:
-        path: cache
-        key: ${{ github.workflow }}-vcpkg-${{ hashFiles('.git/modules/*/HEAD') }}
+        path: |
+          cache
+          vcpkg/.git
+          vcpkg/buildtrees
+          vcpkg/downloads
+          vcpkg/packages
+        key: ${{ github.workflow }}-vcpkg-${{ env.VCPKG_REF }}
+    - name: Bootstrap vcpkg
+      run: |
+        if [ ! -x vcpkg/vcpkg ]; then
+          git clone https://github.com/microsoft/vcpkg.git vcpkg
+          cd vcpkg
+          git checkout $VCPKG_REF
+          ./bootstrap-vcpkg.sh -disableMetrics
+        fi
     - run: cmake -B build -G Ninja -DCMAKE_MAKE_PROGRAM=ninja -DVCPKG_TARGET_TRIPLET=x64-linux -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
     - run: ninja -C build
     - run: ./tests/resources/check_correctness.sh -r -s
