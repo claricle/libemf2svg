@@ -9,7 +9,7 @@
 #    notice, this list of conditions and the following disclaimer.
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or materials provided with the distribution.
+#    documentation and/or other materials provided with the distribution.
 #
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -24,10 +24,10 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 # Restores x86_64 macOS coverage that was dropped when rebasing onto upstream.
-# GitHub no longer offers free Intel macOS runners, so this cross-compiles
-# for x64-osx on an arm64 host. The x86_64 binary is built but not executed
-# here (arm64 cannot run x64 binaries without Rosetta, which we don't rely on
-# in CI). The build itself validates that the x86_64 macOS toolchain works.
+#
+# Uses GitHub's paid Intel runner labels (macos-14-large, macos-15-intel,
+# macos-26-intel). Free Intel macOS runners (macos-12, macos-13) were
+# decommissioned. These run as larger runners and consume billed minutes.
 
 name: emf2svg - MacOS-x86_64
 
@@ -43,46 +43,25 @@ concurrency:
 
 env:
   BUILD_TYPE: Release
-  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/cache
 
 jobs:
-  cross-compile-x64-osx:
+  build-and-test:
     strategy:
       fail-fast: false
       matrix:
         runner:
-          - macos-15
-          - macos-26
+          - macos-14-large    # deprecated; Intel
+          - macos-15-intel    # paid larger runner; Intel
+          - macos-26-intel    # paid larger runner; Intel; current latest
     runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.runner == 'macos-14-large' }}
     steps:
     - uses: actions/checkout@v4
-      with:
-        submodules: recursive
-
-    - run: brew install bash argp-standalone coreutils
-
-    - run: mkdir -p ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-
-    - uses: actions/cache@v4
-      with:
-        path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-        key: ${{ github.workflow }}-${{ matrix.runner }}-vcpkg-${{ hashFiles('sm.txt') }}
-
-    - run: git submodule status > sm.txt
-
-    - run: |
-        cmake -B build \
-          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-          -DVCPKG_TARGET_TRIPLET=x64-osx \
-          -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-          -DLONLY=ON \
-          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
-
+    - run: brew install argp-standalone coreutils libpng freetype fontconfig
+    - run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
     - run: cmake --build build --config ${{ env.BUILD_TYPE }}
-
-    - name: Verify x86_64 architecture of the library
-      run: |
-        lipo -info ./build/libemf2svg.*.dylib 2>/dev/null || \
-        file ./build/libemf2svg.* 2>/dev/null || true
-        file ./build/libemf2svg.* | grep -q x86_64 || \
-          (echo "::error::Built library is not x86_64" && exit 1)
+    # Skip valgrind (-n): valgrind on macOS is flaky (LouisBrunner/valgrind-macos#56).
+    # xmllint checks still run, so SVG correctness still gates CI.
+    - run: ./tests/resources/check_correctness.sh -n -r -s
+    - run: ./tests/resources/check_correctness.sh -n -r -s -e tests/resources/emf-corrupted/ -xN
+    - run: ./tests/resources/check_correctness.sh -n -r -s -e tests/resources/emf-ea/
