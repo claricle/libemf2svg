@@ -105,6 +105,13 @@ endif()
 # argp is not available natively on Windows, so we build it from source
 if(WIN32)
   set(ARGP_NAME argp${EXTERNAL_LIB_DIR_SUFFIX})
+  set(ARGP_ROOT_DIR ${DEPS})
+  set(ARGP_INCLUDE_DIR ${DEPS}/include)
+  if(MSVC)
+    set(ARGP_LIBRARY ${DEPS}/lib/argp-standalone.lib)
+  else()
+    set(ARGP_LIBRARY ${DEPS}/lib/libargp-standalone.a)
+  endif()
   ExternalProject_Add(${ARGP_NAME}
      PREFIX ${DEPS}
      SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/argp-standalone
@@ -113,14 +120,11 @@ if(WIN32)
                 -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                 -DCMAKE_POLICY_VERSION_MINIMUM=3.5
                 ${PLATFORM_TOOLCHAIN_OPTION}
+     # Tell Ninja (used by the MinGW / MSys2 builds) that this ExternalProject
+     # produces the static lib we link into emf2svg-conv. Without it, Ninja
+     # reports "no known rule to make it" for the lib and the build fails.
+     BUILD_BYPRODUCTS ${ARGP_LIBRARY}
   )
-  set(ARGP_ROOT_DIR ${DEPS})
-  set(ARGP_INCLUDE_DIR ${DEPS}/include)
-  if(MSVC)
-    set(ARGP_LIBRARY ${DEPS}/lib/argp-standalone.lib)
-  else()
-    set(ARGP_LIBRARY ${DEPS}/lib/libargp-standalone.a)
-  endif()
 endif(WIN32)
 
 set(DEPS_UEMF ${CMAKE_CURRENT_SOURCE_DIR}/vendor/libuemf)
