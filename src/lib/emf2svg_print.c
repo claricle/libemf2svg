@@ -42,7 +42,7 @@ extern "C" {
   */
 
 void fill_print(drawingStates *states) {
-    switch (states->currentDeviceContext.fill_mode) {
+    switch (states->currentDeviceContext.fill_polymode) {
     case (U_ALTERNATE):
         verbose_printf("   Fill Rule:      U_ALTERNATE\n");
         break;
@@ -671,15 +671,16 @@ void bitmapinfo_print(drawingStates *states, const char *Bmi,
     int ClrUsed;
     U_RGBQUAD BmiColor;
     verbose_printf("BmiHeader: ");
-    IF_MEM_UNSAFE_PRINT_AND_RETURN(Bmi, offsetof(U_BITMAPINFO, bmiHeader) +
-                                            sizeof(U_BITMAPINFOHEADER),
-                                   blimit);
+    IF_MEM_UNSAFE_PRINT_AND_RETURN(
+        Bmi, offsetof(U_BITMAPINFO, bmiHeader) + sizeof(U_BITMAPINFOHEADER),
+        blimit);
     ClrUsed =
         bitmapinfoheader_print(states, Bmi + offsetof(U_BITMAPINFO, bmiHeader));
     if (ClrUsed) {
         k = offsetof(U_BITMAPINFO, bmiColors);
-        IF_MEM_UNSAFE_PRINT_AND_RETURN(Bmi, offsetof(U_BITMAPINFO, bmiColors) +
-                                                ClrUsed * sizeof(U_RGBQUAD),
+        IF_MEM_UNSAFE_PRINT_AND_RETURN(Bmi,
+                                       offsetof(U_BITMAPINFO, bmiColors) +
+                                           ClrUsed * sizeof(U_RGBQUAD),
                                        blimit);
         for (i = 0; i < ClrUsed; i++, k += sizeof(U_RGBQUAD)) {
             memcpy(&BmiColor, Bmi + k, sizeof(U_RGBQUAD));

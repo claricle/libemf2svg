@@ -7,14 +7,15 @@ extern "C" {
 #endif
 #include "emf2svg_private.h"
 #include "emf2svg_print.h"
-#include "font_mapping.c"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 #include <iconv.h>
 #include <errno.h>
+#include <ft2build.h>
+#include <fontconfig/fontconfig.h>
+#include FT_FREETYPE_H
 
 void U_EMRNOTIMPLEMENTED_draw(const char *name, const char *contents, FILE *out,
                               drawingStates *states) {
@@ -30,12 +31,14 @@ void U_swap4(void *ul, unsigned int count);
   points.
   \param rect U_RECTL object
   */
+#ifndef _MSC_VER
 double _dsign(double v) {
     if (v >= 0)
         return 1;
     else
         return -1;
 }
+#endif
 
 void arc_circle_draw(const char *contents, FILE *out, drawingStates *states) {
     PU_EMRANGLEARC pEmr = (PU_EMRANGLEARC)(contents);
@@ -145,7 +148,7 @@ void basic_stroke(drawingStates *states, FILE *out) {
     color_stroke(states, out);
     width_stroke(states, out, states->currentDeviceContext.stroke_width);
 }
-bool checkOutOfEMF(drawingStates *states, intptr_t address) {
+bool checkOutOfEMF(drawingStates *states, uintptr_t address) {
     if (address > states->endAddress) {
         states->Error = true;
         return true;
@@ -507,10 +510,18 @@ double scaleX(drawingStates *states, double x) {
         scalingX = states->pxPerMm / 1440 * mmPerInch * 1;
         break;
     case U_MM_ISOTROPIC:
-        scalingX = states->viewPortExX / states->windowExX;
+        if (states->windowExSet && states->viewPortExSet) {
+            scalingX = states->viewPortExX / states->windowExX;
+        } else {
+            scalingX = 1.0;
+        }
         break;
     case U_MM_ANISOTROPIC:
-        scalingX = states->viewPortExX / states->windowExX;
+        if (states->windowExSet && states->viewPortExSet) {
+            scalingX = states->viewPortExX / states->windowExX;
+        } else {
+            scalingX = 1.0;
+        }
         break;
     default:
         scalingX = 1.0;
@@ -548,10 +559,18 @@ double scaleY(drawingStates *states, double y) {
         scalingY = states->pxPerMm / 1440 * mmPerInch * 1;
         break;
     case U_MM_ISOTROPIC:
-        scalingY = states->viewPortExX / states->windowExX;
+        if (states->windowExSet && states->viewPortExSet) {
+            scalingY = states->viewPortExX / states->windowExX;
+        } else {
+            scalingY = 1.0;
+        }
         break;
     case U_MM_ANISOTROPIC:
-        scalingY = states->viewPortExY / states->windowExY;
+        if (states->windowExSet && states->viewPortExSet) {
+            scalingY = states->viewPortExY / states->windowExY;
+        } else {
+            scalingY = 1.0;
+        }
         break;
     default:
         scalingY = 1.0;
@@ -600,7 +619,11 @@ POINT_D point_cal(drawingStates *states, double x, double y) {
         scalingY = states->pxPerMm / 1440 * mmPerInch * -1;
         break;
     case U_MM_ISOTROPIC:
-        scalingX = states->viewPortExX / states->windowExX;
+        if (states->windowExSet && states->viewPortExSet) {
+            scalingX = states->viewPortExX / states->windowExX;
+        } else {
+            scalingX = 1.0;
+        }
         scalingY = scalingX;
         windowOrgX = states->windowOrgX;
         windowOrgY = states->windowOrgY;
@@ -608,8 +631,14 @@ POINT_D point_cal(drawingStates *states, double x, double y) {
         viewPortOrgY = states->viewPortOrgY;
         break;
     case U_MM_ANISOTROPIC:
-        scalingX = states->viewPortExX / states->windowExX;
-        scalingY = states->viewPortExY / states->windowExY;
+        if (states->windowExSet && states->viewPortExSet) {
+            scalingX = states->viewPortExX / states->windowExX;
+            scalingY = states->viewPortExY / states->windowExY;
+        } else {
+            scalingX = 1.0;
+            // If fixBrokenYTransform is true, we have to flip the Y axis.
+            scalingY = (states->fixBrokenYTransform ? -1.0 : 1.0);
+        }
         windowOrgX = states->windowOrgX;
         windowOrgY = states->windowOrgY;
         viewPortOrgX = states->viewPortOrgX;
@@ -926,6 +955,10 @@ void stroke_draw(drawingStates *states, FILE *out, bool *filled,
         break;
     case U_PS_JOIN_MITER:
         fprintf(out, " stroke-linejoin=\"miter\" ");
+        if (states->currentDeviceContext.miterLimit)
+            fprintf(out, " stroke-miterlimit=\"%.4f\" ",
+                    states->scaling *
+                        (double)states->currentDeviceContext.miterLimit);
         break;
     default:
         break;
@@ -1002,23 +1035,206 @@ void text_style_draw(FILE *out, drawingStates *states, POINT_D Org) {
     fprintf(out, "font-size=\"%.4f\" ", font_height);
 }
 
-static int fontindex_to_utf8(uint16_t *in, size_t size_in, char **out,
-                             size_t *out_len, char *font_name) {
-    const uint32_t *map_table = NULL;
-    size_t max_index = 0;
-    *out_len = 0;
-    if (font_name) {
-        for (int i = 0; i < FONT_MAPS_COL_SIZE; i++) {
-            if (strcasecmp(font_maps[i].font_name, font_name) == 0) {
-                map_table = font_maps[i].uni;
-                max_index = font_maps[i].size;
-                break;
-            }
-        }
+// get the closest ttf file matching font_family, weight, italic
+static int get_fontpath(char *font_family, int weight, int italic,
+                        char **path) {
+    FcPattern *pat;
+    FcObjectSet *os = 0;
+    FcResult result;
+    FcPattern *match;
+    FcFontSet *fs;
+
+    pat = FcNameParse((FcChar8 *)font_family);
+    if (!pat) {
+        return 1;
     }
-    if (map_table == NULL) {
-        map_table = font_maps[0].uni;
-        max_index = font_maps[0].size;
+
+    FcConfigSubstitute(0, pat, FcMatchPattern);
+    // FcDefaultSubstitute(pat);
+    int fcweight;
+
+    if (italic)
+        FcPatternAddInteger(pat, FC_SLANT, FC_SLANT_ITALIC);
+    if (weight) {
+        switch (weight) {
+        case U_PAN_WEIGHT_VERY_LIGHT:
+            fcweight = FC_WEIGHT_EXTRALIGHT;
+            break;
+        case U_PAN_WEIGHT_LIGHT:
+            fcweight = FC_WEIGHT_LIGHT;
+            break;
+        case U_PAN_WEIGHT_THIN:
+            fcweight = FC_WEIGHT_THIN;
+            break;
+        case U_PAN_WEIGHT_BOOK:
+            fcweight = FC_WEIGHT_BOOK;
+            break;
+        case U_PAN_WEIGHT_MEDIUM:
+            fcweight = FC_WEIGHT_MEDIUM;
+            break;
+        case U_PAN_WEIGHT_DEMI:
+            fcweight = FC_WEIGHT_DEMIBOLD;
+            break;
+        case U_PAN_WEIGHT_BOLD:
+            fcweight = FC_WEIGHT_BOLD;
+            break;
+        case U_PAN_WEIGHT_HEAVY:
+            fcweight = FC_WEIGHT_HEAVY;
+            break;
+        case U_PAN_WEIGHT_BLACK:
+            fcweight = FC_WEIGHT_BLACK;
+            break;
+        case U_PAN_WEIGHT_NORD:
+            fcweight = FC_WEIGHT_BLACK;
+            break;
+        default:
+            fcweight = FC_WEIGHT_BOLD;
+        }
+        FcPatternAddInteger(pat, FC_WEIGHT, fcweight);
+    }
+
+    match = FcFontMatch(0, pat, &result);
+
+    fs = FcFontSetCreate();
+    if (match)
+        FcFontSetAdd(fs, match);
+    FcPatternDestroy(pat);
+
+    if (fs) {
+        int j;
+        for (j = 0; j < fs->nfont; j++) {
+            FcPattern *font;
+
+            font = FcPatternFilter(fs->fonts[j], os);
+            char *tmp;
+
+            // FcPatternPrint (font);
+            FcPatternGetString(font, FC_FILE, 0, (FcChar8 **)&tmp);
+            *path = (char *)calloc(strlen(tmp) + 1, sizeof(char));
+            strcpy(*path, tmp);
+            FcPatternDestroy(font);
+        }
+        FcFontSetDestroy(fs);
+    }
+
+    if (os)
+        FcObjectSetDestroy(os);
+
+    FcFini();
+
+    return 0;
+}
+
+// genrate the reverse cmap from the ttf file
+static int cmap_rev(const char *fpath, cmap_collection *rcmap) {
+    FT_Library library;
+
+    int error = FT_Init_FreeType(&library);
+    FT_Face face;
+    if (error) {
+        return 1;
+    }
+
+    error = FT_New_Face(library, fpath, 0, &face);
+    if (error == FT_Err_Unknown_File_Format) {
+        // printf("%s not a font\n", fpath);
+        return 1;
+    } else if (error) {
+        // printf("unknowm error %d\n", error);
+        return 1;
+    } else {
+        // printf("font %s | name %s | style %s\n", fpath, face->family_name,
+        // face->style_name);
+        // printf("%d\n", face->num_charmaps);
+        FT_UInt rmap_s = 1000;
+        rcmap->uni = calloc(rmap_s, sizeof(uint32_t));
+        FT_Select_Charmap(face, FT_ENCODING_UNICODE);
+        FT_UInt gindex = 0;
+        FT_ULong charcode = FT_Get_First_Char(face, &gindex);
+        while (gindex != 0) {
+            if (gindex >= rmap_s) {
+                FT_UInt old_rmap_s = rmap_s;
+                rmap_s += 1000;
+                uint32_t *tmp = realloc(rcmap->uni, sizeof(uint32_t) * rmap_s);
+                for (FT_UInt i = old_rmap_s; i < rmap_s; i++)
+                    tmp[i] = 0;
+                // free(rcmap->uni);
+                rcmap->uni = tmp;
+            }
+            // printf("index: %d | charcode %d\n", gindex, charcode);
+            rcmap->uni[gindex] = charcode;
+            charcode = FT_Get_Next_Char(face, charcode, &gindex);
+        }
+        rcmap->size = rmap_s;
+        FT_Done_Face(face);
+        FT_Done_FreeType(library);
+    }
+    return 0;
+}
+
+// generate the reverse cmap of a given font_family
+static int gen_reverse_map(char *font_family, int weight, bool italic,
+                           cmap_collection *rcmap) {
+    char *path = NULL;
+    int ret = 0;
+    ret = get_fontpath(font_family, weight, italic, &path);
+    if (ret) {
+        // printf("error while search font");
+        free(path);
+        return 1;
+    }
+    ret = cmap_rev(path, rcmap);
+    if (ret) {
+        // printf("error while generating reverse mapping");
+        free(path);
+        return 1;
+    }
+    free(path);
+    return 0;
+}
+
+/*
+ * EMF files can contain weird "encoding".
+ * This file handles one of those:
+ * if ETO_GLYPH_INDEX is set in *TEXTOUT options,
+ * the encoding of a char is basically the index
+ * of its corresponding glyph inside the font ttf file.
+ *
+ * That's great... Thanks a lot Microsoft for this crappy scheme.
+ *
+ * To handle this case, we define some reverse mapping tables
+ * (index of glyph -> unicode).
+ *
+ * Recovering the ttf file is done using fontconfig (function: get_fontpath).
+ * The reverse mapping is done with freetype (function: cmap_rev).
+ *
+ * The .ttf font must be present on your system and properly indexed by
+ * fontconfig
+ *
+ */
+
+static int fontindex_to_utf8(uint16_t *in, size_t size_in, char **out,
+                             size_t *out_len, char *font_name, int weight,
+                             bool italic) {
+    int ret;
+    *out_len = 0;
+    cmap_collection rcmap;
+    rcmap.uni = NULL;
+    if (font_name == NULL) {
+        *out = NULL;
+        return 1;
+    }
+    ret = gen_reverse_map(font_name, weight, italic, &rcmap);
+
+    if (rcmap.uni == NULL) {
+        *out = NULL;
+        return 1;
+    }
+
+    if (rcmap.uni && ret) {
+        free(rcmap.uni);
+        *out = NULL;
+        return 1;
     }
 
     size_t buf_size_left = U_MAX(size_in, 5);
@@ -1030,8 +1246,8 @@ static int fontindex_to_utf8(uint16_t *in, size_t size_in, char **out,
 
     for (int i = 0; i < size_in; i++) {
         uint16_t index = in[i];
-        uint32_t codepoint = map_table[index];
-        if (index < max_index) {
+        uint32_t codepoint = rcmap.uni[index];
+        if (index < rcmap.size) {
             if (codepoint <= 0x7f) {
                 buf[*out_len] = (codepoint & 0x7f);
                 (*out_len)++;
@@ -1074,6 +1290,7 @@ static int fontindex_to_utf8(uint16_t *in, size_t size_in, char **out,
             ptr = realloc(buf, *out_len + increase + buf_size_left);
             if (!ptr) {
                 free(buf);
+                free(rcmap.uni);
                 *out = NULL;
                 return -1;
             }
@@ -1081,6 +1298,7 @@ static int fontindex_to_utf8(uint16_t *in, size_t size_in, char **out,
             buf = ptr;
         }
     }
+    free(rcmap.uni);
     buf[*out_len] = '\0';
     *out = buf;
     return 0;
@@ -1095,14 +1313,14 @@ static int enc_to_utf8(char *in, size_t size_in, char **out, size_t *out_len,
     cd = iconv_open("UTF-8", from_enc);
     if (cd == (iconv_t)-1) {
         *out = NULL;
-        return -1;
+        return 1;
     }
 
     inbytesleft = size_in;
     if (inbytesleft == 0) {
         iconv_close(cd);
         *out = NULL;
-        return -1;
+        return 1;
     }
     inbuf = in;
     out_buf_len = inbytesleft;
@@ -1110,7 +1328,7 @@ static int enc_to_utf8(char *in, size_t size_in, char **out, size_t *out_len,
     if (!*out) {
         iconv_close(cd);
         *out = NULL;
-        return -1;
+        return 1;
     }
     outbytesleft = out_buf_len;
     outbuf = *out;
@@ -1127,7 +1345,7 @@ static int enc_to_utf8(char *in, size_t size_in, char **out, size_t *out_len,
             free(*out);
             iconv_close(cd);
             *out = NULL;
-            return -1;
+            return 1;
         }
         len = outbuf - *out;
         *out = ptr;
@@ -1144,7 +1362,7 @@ static int enc_to_utf8(char *in, size_t size_in, char **out, size_t *out_len,
             free(*out);
             iconv_close(cd);
             *out = NULL;
-            return -1;
+            return 1;
         }
         *out = ptr;
     }
@@ -1152,7 +1370,7 @@ static int enc_to_utf8(char *in, size_t size_in, char **out, size_t *out_len,
         free(*out);
         iconv_close(cd);
         *out = NULL;
-        return -1;
+        return 1;
     }
 
     iconv_close(cd);
@@ -1205,62 +1423,74 @@ void text_convert(char *in, size_t size_in, char **out, size_t *size_out,
         break;
     case FONTINDEX:
         returnOutOfEmf((intptr_t)in + 2 * (intptr_t)size_in);
-        fontindex_to_utf8((uint16_t *)in, size_in, (char **)&string, size_out,
-                          states->currentDeviceContext.font_family);
-        switch (states->currentDeviceContext.font_charset) {
-        case U_HEBREW_CHARSET:
-        case U_ARABIC_CHARSET:
-            /* with Utf-8 strings, the strings must always be
-             * stored in logical order, not visual order.
-             * Unicode Bidirectional (bidi) Algorithm does the work
-             * of rendering the text properly.
-             * So we reverse the text to be in logical order.
-             * However, this seems imcomplete,
-             * Right to Left ordering can also be set in
-             * ExtTextOutOptions (EMR_*TEXTOUT* records) and EMR_SETLAYOUT
-             * records, and it's completely ignored here.
-             * FIXME this is probably to simplistic.
-             */
-            reverse_utf8((char *)string, *size_out);
-            break;
-        case U_ANSI_CHARSET:
-        case U_DEFAULT_CHARSET:
-        case U_SYMBOL_CHARSET:
-        case U_SHIFTJIS_CHARSET:
-        case U_HANGUL_CHARSET:
-        case U_GB2312_CHARSET:
-        case U_CHINESEBIG5_CHARSET:
-        case U_GREEK_CHARSET:
-        case U_TURKISH_CHARSET:
-        case U_BALTIC_CHARSET:
-        case U_RUSSIAN_CHARSET:
-        case U_EASTEUROPE_CHARSET:
-        case U_THAI_CHARSET:
-        case U_JOHAB_CHARSET:
-        case U_MAC_CHARSET:
-        case U_OEM_CHARSET:
-        case U_VISCII_CHARSET:
-        case U_TCVN_CHARSET:
-        case U_KOI8_CHARSET:
-        case U_ISO3_CHARSET:
-        case U_ISO4_CHARSET:
-        case U_ISO10_CHARSET:
-        case U_CELTIC_CHARSET:
-        default:
-            break;
+        ret = fontindex_to_utf8((uint16_t *)in, size_in, (char **)&string,
+                                size_out,
+                                states->currentDeviceContext.font_family,
+                                states->currentDeviceContext.font_weight,
+                                states->currentDeviceContext.font_italic);
+        if (ret==0 && string!=NULL) {
+            switch (states->currentDeviceContext.font_charset) {
+            case U_HEBREW_CHARSET:
+            case U_ARABIC_CHARSET:
+                /* with Utf-8 strings, the strings must always be
+                 * stored in logical order, not visual order.
+                 * Unicode Bidirectional (bidi) Algorithm does the work
+                 * of rendering the text properly.
+                 * So we reverse the text to be in logical order.
+                 * However, this seems imcomplete,
+                 * Right to Left ordering can also be set in
+                 * ExtTextOutOptions (EMR_*TEXTOUT* records) and EMR_SETLAYOUT
+                 * records, and it's completely ignored here.
+                 * FIXME this is probably to simplistic.
+                 */
+                reverse_utf8((char*)string, *size_out);
+                break;
+            case U_ANSI_CHARSET:
+            case U_DEFAULT_CHARSET:
+            case U_SYMBOL_CHARSET:
+            case U_SHIFTJIS_CHARSET:
+            case U_HANGUL_CHARSET:
+            case U_GB2312_CHARSET:
+            case U_CHINESEBIG5_CHARSET:
+            case U_GREEK_CHARSET:
+            case U_TURKISH_CHARSET:
+            case U_BALTIC_CHARSET:
+            case U_RUSSIAN_CHARSET:
+            case U_EASTEUROPE_CHARSET:
+            case U_THAI_CHARSET:
+            case U_JOHAB_CHARSET:
+            case U_MAC_CHARSET:
+            case U_OEM_CHARSET:
+            case U_VISCII_CHARSET:
+            case U_TCVN_CHARSET:
+            case U_KOI8_CHARSET:
+            case U_ISO3_CHARSET:
+            case U_ISO4_CHARSET:
+            case U_ISO10_CHARSET:
+            case U_CELTIC_CHARSET:
+            default:
+                break;
+            }
         }
         break;
     default:
-        returnOutOfEmf((intptr_t)in + (intptr_t)size_in);
-        string = (uint8_t *)calloc((size_in + 1), 1);
-        strncpy((char *)string, in, size_in);
-        *size_out = size_in;
+        if (checkOutOfEMF(states,
+                          (uintptr_t)((uintptr_t)in + (uintptr_t)size_in))) {
+            string = NULL;
+        }
+        else {
+            string = (uint8_t *)calloc((size_in + 1), 1);
+            strncpy((char *)string, in, size_in);
+            *size_out = size_in;
+        }
+        break;
     }
+
     if (ret != 0)
         string = NULL;
 
     if (string == NULL) {
-        return;
+            return;
     }
 
     int i = 0;
@@ -1432,7 +1662,14 @@ bool transform_set(drawingStates *states, U_XFORM xform, uint32_t iMode) {
     }
 }
 void width_stroke(drawingStates *states, FILE *out, double width) {
-    fprintf(out, "stroke-width=\"%.4f\" ", width * states->scaling);
+    double tmp_w = scaleX(states, width);
+    // minimum size of a line seems to be 1px, even if smaller after resize
+    // keeping this behavior
+    if ((tmp_w / states->scaling) < 1.0) {
+        fprintf(out, "stroke-width=\"1px\" ");
+    } else {
+        fprintf(out, "stroke-width=\"%.4f\" ", tmp_w);
+    }
 }
 
 static char encoding_table[] = {

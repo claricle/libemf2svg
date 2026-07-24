@@ -36,9 +36,29 @@ emf2svg-conv
 
 # out directory
 out
+build
+
+# test files
+tests/resources/tmp
+
+# VS files
+.vs
+
 
 # external build directory
 external-build
 
+coverage
+emf2svg-test
+
 # exceptions
 !tests/resources/filesmasher-master/Makefile
+
+# external projects
+vcpkg
+vcpkg_installed
+vcpkg-manifest-install.log
+deps/tmp
+deps/src
+deps/include
+deps/lib

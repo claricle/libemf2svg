@@ -167,7 +167,9 @@ void U_EMRSETMETARGN_draw(const char *contents, FILE *out,
 }
 void U_EMRSETMITERLIMIT_draw(const char *contents, FILE *out,
                              drawingStates *states) {
-    FLAG_IGNORED;
+    FLAG_SUPPORTED;
+    PU_EMRSETMITERLIMIT pEmr = (PU_EMRSETMITERLIMIT)(contents);
+    states->currentDeviceContext.miterLimit = pEmr->eMiterLimit;
     if (states->verbose) {
         U_EMRSETMITERLIMIT_print(contents, states);
     }
@@ -226,6 +228,7 @@ void U_EMRSETVIEWPORTEXTEX_draw(const char *contents, FILE *out,
 
     states->viewPortExX = (double)pEmr->szlExtent.cx;
     states->viewPortExY = (double)pEmr->szlExtent.cy;
+    states->viewPortExSet = true;
 }
 void U_EMRSETVIEWPORTORGEX_draw(const char *contents, FILE *out,
                                 drawingStates *states) {
@@ -247,6 +250,7 @@ void U_EMRSETWINDOWEXTEX_draw(const char *contents, FILE *out,
     PU_EMRSETWINDOWEXTEX pEmr = (PU_EMRSETVIEWPORTEXTEX)(contents);
     states->windowExX = (double)pEmr->szlExtent.cx;
     states->windowExY = (double)pEmr->szlExtent.cy;
+    states->windowExSet = true;
 }
 void U_EMRSETWINDOWORGEX_draw(const char *contents, FILE *out,
                               drawingStates *states) {

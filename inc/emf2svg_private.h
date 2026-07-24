@@ -7,9 +7,6 @@ extern "C" {
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef DARWIN
-#include <memstream.h>
-#endif
 
 #define KNRM "\x1B[0m"
 #define KRED "\x1B[31m"
@@ -34,7 +31,7 @@ extern "C" {
 #define FLAG_RESET verbose_printf("%s", KNRM);
 
 #define returnOutOfEmf(a)                                                      \
-    if (checkOutOfEMF(states, (intptr_t)(a))) {                                \
+    if (checkOutOfEMF(states, (uintptr_t)(a))) {                                \
         return;                                                                \
     }
 #define returnOutOfOTIndex(a)                                                  \
@@ -149,6 +146,7 @@ typedef struct emf_device_context {
     uint8_t font_charset;
 
     uint32_t stretchMode;
+    uint32_t miterLimit;
 
     int16_t arcdir;
 
@@ -286,10 +284,16 @@ typedef struct {
     double viewPortOrgY;
     double viewPortExX;
     double viewPortExY;
+    // true if viewport extent has been set, false otherwise
+    bool viewPortExSet;
     double windowOrgX;
     double windowOrgY;
     double windowExX;
     double windowExY;
+    // true if windows extent has been set, false otherwise
+    bool windowExSet;
+    // true if we are fixing layout problems from Wine-generated EMF
+    bool fixBrokenYTransform;
     double pxPerMm;
     uint16_t MapMode;
     // Text orientation
@@ -312,6 +316,11 @@ typedef struct {
     emfImageLibrary *library;
 } drawingStates;
 
+typedef struct cmap_collection {
+    size_t size;
+    uint32_t *uni;
+} cmap_collection;
+
 #define U_MWT_SET 4 //!< Transform is basic SET
 
 #define BUFFERSIZE 1024
@@ -333,7 +342,7 @@ void point16_draw(drawingStates *states, U_POINT16 pt, FILE *out);
 void point_draw(drawingStates *states, U_POINT pt, FILE *out);
 void freePathStack(pathStack *stack);
 // checks if address is outside the memory containing the emf file
-bool checkOutOfEMF(drawingStates *states, intptr_t address);
+bool checkOutOfEMF(drawingStates *states, uintptr_t address);
 // checks if index is greater than the object table size
 bool checkOutOfOTIndex(drawingStates *states, int64_t index);
 void fill_draw(drawingStates *states, FILE *out, bool *filled, bool *stroked);
