@@ -46,7 +46,6 @@ jobs:
         runner:
           - macos-14      # deprecated but still available; remove when decommissioned
           - macos-15
-          - macos-26      # current macos-latest as of 2026-07
     runs-on: ${{ matrix.runner }}
     continue-on-error: ${{ matrix.runner == 'macos-14' }}
     steps:
