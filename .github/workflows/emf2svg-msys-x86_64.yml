@@ -43,6 +43,7 @@ concurrency:
 env:
   BUILD_TYPE: Release
   MAKEFLAGS: -j4
+  VCPKG_REF: 4f95fba7a7d1101bb8acdeb51e4609686449701e
 
 jobs:
   build-and-smoke-test:
@@ -61,8 +62,6 @@ jobs:
 
     - name: Checkout
       uses: actions/checkout@v4
-      with:
-        submodules: recursive
 
     - name: Configure cache
       run: |
@@ -73,16 +72,23 @@ jobs:
         echo "$(pwd -W)/cache" >> $GITHUB_ENV
         echo 'EOF' >> $GITHUB_ENV
 
-    - name: Create cache storage and cache key
-      run: |
-        mkdir ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-        git submodule status > sm.txt
+    - name: Create cache storage
+      run: mkdir ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
 
     - name: Process cache
       uses: actions/cache@v4
       with:
         path: ${{ env.CI_CACHE }}
-        key: ${{ github.workflow }}-mingw64-vcpkg-${{ hashFiles('sm.txt') }}
+        key: ${{ github.workflow }}-mingw64-vcpkg-${{ env.VCPKG_REF }}
+
+    - name: Bootstrap vcpkg
+      run: |
+        if [ ! -x vcpkg/vcpkg ]; then
+          git clone https://github.com/microsoft/vcpkg.git vcpkg
+          cd vcpkg
+          git checkout $VCPKG_REF
+          ./bootstrap-vcpkg.sh -disableMetrics
+        fi
 
     - name: Configure
       run: |
@@ -121,8 +127,6 @@ jobs:
 
     - name: Checkout
       uses: actions/checkout@v4
-      with:
-        submodules: recursive
 
     - name: Configure cache
       run: |
@@ -133,16 +137,23 @@ jobs:
         echo "$(pwd -W)/cache" >> $GITHUB_ENV
         echo 'EOF' >> $GITHUB_ENV
 
-    - name: Create cache storage and cache key
-      run: |
-        mkdir ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-        git submodule status > sm.txt
+    - name: Create cache storage
+      run: mkdir ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
 
     - name: Process cache
       uses: actions/cache@v4
       with:
         path: ${{ env.CI_CACHE }}
-        key: ${{ github.workflow }}-${{ matrix.sys }}-vcpkg-${{ hashFiles('sm.txt') }}
+        key: ${{ github.workflow }}-${{ matrix.sys }}-vcpkg-${{ env.VCPKG_REF }}
+
+    - name: Bootstrap vcpkg
+      run: |
+        if [ ! -x vcpkg/vcpkg ]; then
+          git clone https://github.com/microsoft/vcpkg.git vcpkg
+          cd vcpkg
+          git checkout $VCPKG_REF
+          ./bootstrap-vcpkg.sh -disableMetrics
+        fi
 
     - name: Configure
       run: |
