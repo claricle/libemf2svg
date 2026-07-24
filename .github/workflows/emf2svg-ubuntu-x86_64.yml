@@ -40,7 +40,16 @@ env:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+          - runner: ubuntu-24.04
+          - runner: ubuntu-26.04    # public preview
+            experimental: true
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.experimental || false }}
     steps:
     - uses: actions/checkout@v4
     - run: sudo apt update && sudo apt-get install -y libxml2-utils valgrind libpng-dev libfreetype-dev libfontconfig-dev

@@ -23,7 +23,10 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-name: emf2svg - MacOS-arm64
+# Windows ARM64 coverage. Uses the native windows-11-arm runner image
+# and the arm64-windows vcpkg triplet.
+
+name: emf2svg - Windows-aarch64
 
 on:
   push:
@@ -39,24 +42,28 @@ env:
   BUILD_TYPE: Release
 
 jobs:
-  build-and-test:
+  smoke-test:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14       # deprecated
+          - runner: windows-11-arm
+          - runner: windows-11-vs2026-arm    # public preview
             experimental: true
-          - runner: macos-15
-          - runner: macos-26
     runs-on: ${{ matrix.runner }}
     continue-on-error: ${{ matrix.experimental || false }}
     steps:
     - uses: actions/checkout@v4
-    - run: brew install argp-standalone coreutils libpng freetype fontconfig
-    - run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+      with:
+        submodules: recursive
+    - run: mkdir cache
+    - uses: actions/cache@v4
+      with:
+        path: cache
+        key: ${{ github.workflow }}-${{ matrix.runner }}-vcpkg-${{ hashFiles('.git/modules/*/HEAD') }}
+    - run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DVCPKG_TARGET_TRIPLET=arm64-windows -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake
     - run: cmake --build build --config ${{ env.BUILD_TYPE }}
-    # Skip valgrind (-n): valgrind on macOS is flaky (LouisBrunner/valgrind-macos#56).
-    # xmllint checks still run, so SVG correctness still gates CI.
-    - run: ./tests/resources/check_correctness.sh -n -r -s
-    - run: ./tests/resources/check_correctness.sh -n -r -s -e tests/resources/emf-corrupted/ -xN
-    - run: ./tests/resources/check_correctness.sh -n -r -s -e tests/resources/emf-ea/
+    - run: |
+        build\${{ env.BUILD_TYPE }}\emf2svg-conv.exe --version
+        build\${{ env.BUILD_TYPE }}\emf2svg-conv.exe -i tests\resources\emf\test-000.emf -o test-000.svg
+        dir . | findstr test-000.svg

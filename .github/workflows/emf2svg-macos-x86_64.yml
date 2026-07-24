@@ -23,11 +23,8 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-# Restores x86_64 macOS coverage that was dropped when rebasing onto upstream.
-#
-# Uses GitHub's paid Intel runner labels (macos-14-large, macos-15-intel,
-# macos-26-intel). Free Intel macOS runners (macos-12, macos-13) were
-# decommissioned. These run as larger runners and consume billed minutes.
+# Restores x86_64 macOS coverage dropped when rebasing onto upstream.
+# Uses GitHub's Intel runner labels: macos-15-intel and macos-26-intel.
 
 name: emf2svg - MacOS-x86_64
 
@@ -50,11 +47,9 @@ jobs:
       fail-fast: false
       matrix:
         runner:
-          - macos-14-large    # deprecated; Intel
-          - macos-15-intel    # paid larger runner; Intel
-          - macos-26-intel    # paid larger runner; Intel; current latest
+          - macos-15-intel
+          - macos-26-intel
     runs-on: ${{ matrix.runner }}
-    continue-on-error: ${{ matrix.runner == 'macos-14-large' }}
     steps:
     - uses: actions/checkout@v4
     - run: brew install argp-standalone coreutils libpng freetype fontconfig
