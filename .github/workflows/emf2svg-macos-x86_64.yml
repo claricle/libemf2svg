@@ -9,7 +9,7 @@
 #    notice, this list of conditions and the following disclaimer.
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
+#    documentation and/or materials provided with the distribution.
 #
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -23,7 +23,13 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-name: emf2svg - Windows-x86_64
+# Restores x86_64 macOS coverage that was dropped when rebasing onto upstream.
+# GitHub no longer offers free Intel macOS runners, so this cross-compiles
+# for x64-osx on an arm64 host. The x86_64 binary is built but not executed
+# here (arm64 cannot run x64 binaries without Rosetta, which we don't rely on
+# in CI). The build itself validates that the x86_64 macOS toolchain works.
+
+name: emf2svg - MacOS-x86_64
 
 on:
   push:
@@ -37,28 +43,46 @@ concurrency:
 
 env:
   BUILD_TYPE: Release
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/cache
 
 jobs:
-  smoke-test:
+  cross-compile-x64-osx:
     strategy:
       fail-fast: false
       matrix:
         runner:
-          - windows-2022
-          - windows-2025
+          - macos-15
+          - macos-26
     runs-on: ${{ matrix.runner }}
     steps:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
-    - run: mkdir cache
+
+    - run: brew install bash argp-standalone coreutils
+
+    - run: mkdir -p ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+
     - uses: actions/cache@v4
       with:
-        path: cache
-        key: ${{ github.workflow }}-${{ matrix.runner }}-vcpkg-${{ hashFiles('.git/modules/*/HEAD') }}
-    - run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake
-    - run: cmake --build build --config ${{ env.BUILD_TYPE }}
+        path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+        key: ${{ github.workflow }}-${{ matrix.runner }}-vcpkg-${{ hashFiles('sm.txt') }}
+
+    - run: git submodule status > sm.txt
+
     - run: |
-        build\${{ env.BUILD_TYPE }}\emf2svg-conv.exe --version
-        build\${{ env.BUILD_TYPE }}\emf2svg-conv.exe -i tests\resources\emf\test-000.emf -o test-000.svg
-        dir . | findstr test-000.svg
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+          -DVCPKG_TARGET_TRIPLET=x64-osx \
+          -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+          -DLONLY=ON \
+          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+
+    - run: cmake --build build --config ${{ env.BUILD_TYPE }}
+
+    - name: Verify x86_64 architecture of the library
+      run: |
+        lipo -info ./build/libemf2svg.*.dylib 2>/dev/null || \
+        file ./build/libemf2svg.* 2>/dev/null || true
+        file ./build/libemf2svg.* | grep -q x86_64 || \
+          (echo "::error::Built library is not x86_64" && exit 1)

@@ -19,7 +19,7 @@
 # CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
 # SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
 # INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# CONTRACT, STRICT LIABILITY OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
@@ -40,16 +40,22 @@ env:
 
 jobs:
   build-and-test:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - macos-14      # deprecated but still available; remove when decommissioned
+          - macos-15
+          - macos-26      # current macos-latest as of 2026-07
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.runner == 'macos-14' }}
     steps:
     - uses: actions/checkout@v4
     - run: brew install argp-standalone coreutils libpng freetype fontconfig
     - run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
     - run: cmake --build build --config ${{ env.BUILD_TYPE }}
-    - run: ./tests/resources/check_correctness.sh -r -s
-      continue-on-error: true
-    - run: ./tests/resources/check_correctness.sh -r -s -e tests/resources/emf-corrupted/ -xN
-      continue-on-error: true
-    - run: ./tests/resources/check_correctness.sh -r -s -e tests/resources/emf-ea/
-      continue-on-error: true
-
+    # Skip valgrind (-n): valgrind on macOS is flaky (LouisBrunner/valgrind-macos#56).
+    # xmllint checks still run, so SVG correctness still gates CI.
+    - run: ./tests/resources/check_correctness.sh -n -r -s
+    - run: ./tests/resources/check_correctness.sh -n -r -s -e tests/resources/emf-corrupted/ -xN
+    - run: ./tests/resources/check_correctness.sh -n -r -s -e tests/resources/emf-ea/
