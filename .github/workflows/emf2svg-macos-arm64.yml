@@ -44,8 +44,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14       # deprecated
-            experimental: true
           - runner: macos-15
           - runner: macos-26
     runs-on: ${{ matrix.runner }}

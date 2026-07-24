@@ -176,7 +176,13 @@ extern int __posix_getopt (int ___argc, char *const *___argv,
 #  endif
 # endif
 #else /* not __GNU_LIBRARY__ */
-extern int getopt ();
+/* Use a proper prototype (not K&R-style `extern int getopt();`) so that
+   hosts whose headers ship a getopt declaration -- notably MinGW, whose
+   <getopt.h> is pulled in transitively via <unistd.h> -- do not see a
+   conflicting re-declaration. The prototype matches the definition in
+   getopt.c. */
+extern int getopt (int ___argc, char *const *___argv, const char *__shortopts)
+       __THROW;
 #endif /* __GNU_LIBRARY__ */
 
 #ifndef __need_getopt
