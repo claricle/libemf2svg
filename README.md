@@ -238,6 +238,13 @@ EMF+ RECORDS:
 ChangeLogs
 ----------
 
+1.8.2:
+
+* Fix argp-standalone build on MinGW/GCC 16+ (proper `getopt` prototype in non-glibc branch of `argp-getopt.h`)
+* Fix Ninja build of `emf2svg-conv` on MinGW by declaring `BUILD_BYPRODUCTS` on the argp ExternalProject
+* Restore MSys2/MinGW CI workflow that upstream had dropped
+* Add release workflow that publishes `libemf2svg.tar.gz` to GitHub Releases on tag push
+
 
 1.8.1:
 
