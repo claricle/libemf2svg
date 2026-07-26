@@ -38,65 +38,39 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04-arm
-    # Experimental: vcpkg has no public binary cache for arm64-linux or
-    # arm64-linux-musl, so the first run on a cold cache compiles
-    # freetype/fontconfig/libxml2/libpng/etc. from source on native
-    # arm64-musl, often exceeding the 6h job timeout. The job is kept
-    # here so the workflow gets exercised when vcpkg's arm64 cache
-    # improves (or when we switch to apk-installed deps).
-    continue-on-error: true
     env:
       BUILD_TYPE: Release
-      VCPKG_FORCE_SYSTEM_BINARIES: 1
-      VCPKG_REF: 4f95fba7a7d1101bb8acdeb51e4609686449701e
     steps:
     - uses: actions/checkout@v4
     - run: git config --global --add safe.directory $(pwd)
-    - run: mkdir -p cache
-    - uses: actions/cache@v4
-      with:
-        path: |
-          cache
-          vcpkg/.git
-          vcpkg/buildtrees
-          vcpkg/downloads
-          vcpkg/packages
-        key: ${{ github.workflow }}-vcpkg-${{ env.VCPKG_REF }}
 
     # GitHub Actions does not allow JS-based actions inside an Alpine
     # container on ARM64 runners (actions/runner#2006). Run the entire
     # build inside an Alpine container via `docker run`, with the
-    # workspace mounted at /work. The vcpkg cache (above) lives on the
-    # host and is shared into the container via the mount.
+    # workspace mounted at /work.
+    #
+    # vcpkg has no public binary cache for arm64-linux, so we skip it
+    # entirely and link against Alpine's -dev packages via pkg-config
+    # (same approach the emf2svg-ruby gem's recipe takes for musl).
     - name: Build and test in Alpine container
       run: |
         docker run --rm \
           -v "$PWD:/work" \
           -w /work \
           -e BUILD_TYPE="${BUILD_TYPE}" \
-          -e VCPKG_FORCE_SYSTEM_BINARIES=1 \
-          -e VCPKG_DEFAULT_BINARY_CACHE=/work/cache \
           alpine:3.21 sh -c '
             set -eux
             apk --no-cache add \
-              build-base cmake git valgrind argp-standalone gcompat clang \
-              gperf flex bison gettext-dev python3 ninja zip unzip curl \
-              pkgconfig libxml2-utils font-noto-hebrew font-noto-arabic \
-              libpng freetype fontconfig libuuid autoconf autoconf-archive \
-              automake libtool
-
-            if [ ! -x vcpkg/vcpkg ]; then
-              git clone https://github.com/microsoft/vcpkg.git vcpkg
-              cd vcpkg
-              git checkout '"${VCPKG_REF}"'
-              ./bootstrap-vcpkg.sh -disableMetrics
-              cd ..
-            fi
+              build-base cmake git valgrind argp-standalone clang \
+              gperf flex bison python3 ninja pkgconfig \
+              libxml2-utils font-noto-hebrew font-noto-arabic \
+              libpng-dev freetype-dev fontconfig-dev libxml2-dev \
+              gettext-dev zlib-dev libuuid linux-headers \
+              autoconf autoconf-archive automake libtool file
 
             cmake -B build -G Ninja \
               -DCMAKE_MAKE_PROGRAM=ninja \
-              -DVCPKG_TARGET_TRIPLET=arm64-linux \
-              -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake \
+              -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
               -DCMAKE_C_COMPILER=clang \
               -DCMAKE_CXX_COMPILER=clang++
             ninja -C build
