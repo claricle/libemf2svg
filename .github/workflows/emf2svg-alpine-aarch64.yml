@@ -38,6 +38,13 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04-arm
+    # Experimental: vcpkg has no public binary cache for arm64-linux or
+    # arm64-linux-musl, so the first run on a cold cache compiles
+    # freetype/fontconfig/libxml2/libpng/etc. from source on native
+    # arm64-musl, often exceeding the 6h job timeout. The job is kept
+    # here so the workflow gets exercised when vcpkg's arm64 cache
+    # improves (or when we switch to apk-installed deps).
+    continue-on-error: true
     env:
       BUILD_TYPE: Release
       VCPKG_FORCE_SYSTEM_BINARIES: 1
