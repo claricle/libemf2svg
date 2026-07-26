@@ -69,11 +69,21 @@ jobs:
     - name: Bootstrap vcpkg
       shell: pwsh
       run: |
-        if (-not (Test-Path vcpkg/vcpkg.exe)) {
+        # Cache restores vcpkg/.git but not the working tree or vcpkg.exe.
+        # If we have a partial dir without vcpkg.exe, nuke and re-clone to
+        # get a clean working tree (the cached .git alone isn't enough for
+        # bootstrap-vcpkg.bat to find its own files).
+        if ((Test-Path vcpkg) -and -not (Test-Path vcpkg/vcpkg.exe)) {
+          Remove-Item -Recurse -Force vcpkg
+        }
+        if (-not (Test-Path vcpkg)) {
           git clone https://github.com/microsoft/vcpkg.git vcpkg
-          cd vcpkg
-          git checkout $env:VCPKG_REF
+        }
+        if (-not (Test-Path vcpkg/vcpkg.exe)) {
+          Push-Location vcpkg
+          git checkout $env:VCPKG_REF --force
           .\bootstrap-vcpkg.bat -disableMetrics
+          Pop-Location
         }
     - run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DVCPKG_TARGET_TRIPLET=arm64-windows -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake
     - run: cmake --build build --config ${{ env.BUILD_TYPE }}
